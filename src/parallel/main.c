@@ -52,18 +52,33 @@ static int ler_sequencia(const char *nome_arquivo, struct Sequencia *seq) {
 
 int main(int argc, char *argv[]) {
 
+    MPI_Init(&argc, &argv);
+    
+    int rank, num_processos;
+
+    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+    MPI_Comm_size(MPI_COMM_WORLD, &num_processos);
+
     // Verifica os argumentos
     if (argc != 4) {
-        fprintf(stderr,
-                "Uso: %s <arquivo_A> <arquivo_B> <tamanho_bloco>\n",
-                argv[0]);
+
+        if (rank == 0) {
+             fprintf(stderr, "Uso: %s <arquivo_A> <arquivo_B> <tamanho_bloco>\n", argv[0]);
+        }
+
+        MPI_Finalize();
         return EXIT_FAILURE;
     }
 
     int tam_bloco = atoi(argv[3]);
 
     if (tam_bloco <= 0) {
-        fprintf(stderr, "O tamanho do bloco deve ser positivo.\n");
+
+        if (rank == 0) {
+            fprintf(stderr, "Tamanho de bloco inválido.\n");
+        }
+
+        MPI_Finalize();
         return EXIT_FAILURE;
     }
 
@@ -71,32 +86,34 @@ int main(int argc, char *argv[]) {
     struct Sequencia B = {NULL, 0};
 
     // Lê as duas sequências
-    if (ler_sequencia(argv[1], &A) != 0) {
-        free(A.dados);
-        return EXIT_FAILURE;
-    }
+   if (ler_sequencia(argv[1], &A) != 0 || ler_sequencia(argv[2], &B) != 0) {
 
-    if (ler_sequencia(argv[2], &B) != 0) {
+        if (rank == 0)
+            fprintf(stderr, "Erro ao ler as sequências.\n");
+
         free(A.dados);
         free(B.dados);
+
+        MPI_Finalize();
         return EXIT_FAILURE;
     }
 
     // Executa o algoritmo LCS
     int resultado = lcs_wavefront(&A, &B, tam_bloco);
 
-    if (resultado < 0) {
-        fprintf(stderr, "Erro durante o cálculo da LCS.\n");
-        free(A.dados);
-        free(B.dados);
-        return EXIT_FAILURE;
+   if (rank == 0 && resultado >= 0) {
+        printf("LCS: %d\n", resultado);
     }
 
-    printf("LCS: %d\n", resultado);
 
     // Libera a memória das sequências
     free(A.dados);
     free(B.dados);
 
-    return EXIT_SUCCESS;
+    MPI_Finalize();
+
+    if (resultado < 0)
+        return EXIT_FAILURE;
+    else
+        return EXIT_SUCCESS;
 }

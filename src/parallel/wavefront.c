@@ -36,8 +36,16 @@ static int calcular_bloco(struct Bloco *bloco, const struct Sequencia *A, const 
         sizeof(mtype)
     );
 
-    if (matriz == NULL)
-        return -1;
+    if (matriz == NULL) {
+        fprintf(stderr,
+            "Erro de alocacao: bloco (%d, %d), altura=%d, largura=%d\n",
+            bloco->inicio_i,
+            bloco->inicio_j,
+            bloco->altura,
+            bloco->largura);
+            return -1;
+    }
+        
 
 
     // Inicializa a primeira linha com a fronteira inferior do bloco que está acima do bloco atual.
@@ -100,7 +108,7 @@ static int calcular_bloco(struct Bloco *bloco, const struct Sequencia *A, const 
     for (int i = 0; i <= h; i++) {
         bloco->front_dir[i] = matriz[i * colunas + l];
     }
-    
+
     // Libera a matriz temporária
     free(matriz);
 
@@ -119,6 +127,11 @@ int lcs_wavefront(const struct Sequencia *A, const struct Sequencia *B, int tam_
         fprintf(stderr, "Parâmetros inválidos\n");
         return -1;
     }
+
+    int rank, num_processos;
+
+    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+    MPI_Comm_size(MPI_COMM_WORLD, &num_processos);
 
     int tamA = A->tam;
     int tamB = B->tam;
@@ -145,7 +158,6 @@ int lcs_wavefront(const struct Sequencia *A, const struct Sequencia *B, int tam_
         fprintf(stderr, "Erro ao alocar os blocos\n");
         return -1;
     }
-
 
     // Define as dimensões e aloca as fronteiras de todos os blocos
     for (int i = 0; i < num_blocos_linhas; i++) {
@@ -194,23 +206,25 @@ int lcs_wavefront(const struct Sequencia *A, const struct Sequencia *B, int tam_
         }
     }
 
-
-    // Calcula o número total de diagonais.
+    // Calcula o número total de diagonais
     int total_diagonais = num_blocos_linhas + num_blocos_colunas - 1;
 
     // Percorre cada diagonal
     for (int diag = 0; diag < total_diagonais; diag++) {
 
+        int erro_local = 0;
+
         // Percorre as linhas para encontrar os blocos da diagonal atual
+        // Cada processo calcula seus blocos usando OpenMP
+        #pragma omp parallel for reduction(|:erro_local)
         for (int i = 0; i < num_blocos_linhas; i++) {
 
             // Calcula a coluna do bloco pertencente à diagonal atual
             int j = diag - i;
 
-            // Ignora posições que não correspondem a blocos existentes.
+            // Ignora posições que não correspondem a blocos existentes
             if (j < 0 || j >= num_blocos_colunas)
                 continue;
-
 
             // Calcula o índice do bloco atual no vetor.
             int indice = i * num_blocos_colunas + j;
@@ -228,13 +242,49 @@ int lcs_wavefront(const struct Sequencia *A, const struct Sequencia *B, int tam_
                 esquerda = &blocos[i * num_blocos_colunas + (j - 1)];
             }
 
-            // Calcula o bloco atual utilizando as fronteiras dos blocos acima e à esquerda.
-            if (calcular_bloco(&blocos[indice], A, B, cima, esquerda) != 0) {
-                fprintf(stderr, "Erro ao calcular bloco\n");
-                libera_blocos(blocos, qtde);
+            int dono = indice % num_processos;
 
-                return -1;
+            // Calcula o bloco atual utilizando as fronteiras dos blocos acima e à esquerda
+            if (dono == rank) {
+                if (calcular_bloco(&blocos[indice], A, B, cima, esquerda) != 0) {
+                     fprintf(stderr, "Processo %d falhou no bloco (%d, %d), indice=%d\n", rank, i, j, indice);
+                    erro_local = 1;
+                }
             }
+            
+        }
+
+        // Verifica se algum processo teve erro
+        int erro_global = 0;
+
+        // Permite combinar valores de todos os processos e disponibilizar o resultado para todos
+        MPI_Allreduce(&erro_local, &erro_global, 1, MPI_INT, MPI_MAX, MPI_COMM_WORLD);
+        
+        if (erro_global) {
+            if (rank == 0)
+                fprintf(stderr, "Erro ao calcular bloco\n");
+            libera_blocos(blocos, qtde);
+            return -1;
+        }
+
+        // Compartilha as fronteiras dos blocos da diagonal
+        for (int i = 0; i < num_blocos_linhas; i++) {
+            int j = diag - i;
+
+            if (j < 0 || j >= num_blocos_colunas)
+                continue;
+            
+            // Transforma a posição do bloco em um índice linear
+            int indice = i * num_blocos_colunas + j;
+            // Define qual processo é responsável por calcular o bloco
+            int dono = indice % num_processos;
+
+            // Broadcast: faz uma transmissão de um processo para todos os outros processos do comunicador
+            MPI_Bcast(blocos[indice].front_baixo, blocos[indice].largura + 1,
+                      MPI_UNSIGNED_SHORT, dono, MPI_COMM_WORLD);
+            
+            MPI_Bcast(blocos[indice].front_dir, blocos[indice].altura + 1,
+                      MPI_UNSIGNED_SHORT, dono, MPI_COMM_WORLD);
         }
     }
 
