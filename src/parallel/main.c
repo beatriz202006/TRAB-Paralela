@@ -52,7 +52,10 @@ static int ler_sequencia(const char *nome_arquivo, struct Sequencia *seq) {
 
 int main(int argc, char *argv[]) {
 
-    MPI_Init(&argc, &argv);
+    if (MPI_Init(&argc, &argv) != MPI_SUCCESS) {
+        fprintf(stderr, "Erro ao inicializar MPI.\n");
+        return EXIT_FAILURE;
+    }
     
     int rank, num_processos;
 
