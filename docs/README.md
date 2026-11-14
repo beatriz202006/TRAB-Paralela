@@ -1,7 +1,5 @@
 # LCS — Programação Paralela
 
-Trabalho prático da disciplina de Programação Paralela (UFPR — CI1316), desenvolvido em dupla.
-
 O objetivo é implementar uma versão paralela do algoritmo **Longest Common Subsequence (LCS)** utilizando uma abordagem híbrida com MPI e OpenMP, comparar seu desempenho com uma implementação sequencial e analisar os resultados experimentais.
 
 ---
