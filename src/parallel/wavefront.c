@@ -188,7 +188,7 @@ int lcs_wavefront(
     mtype resultado = 0;
 
     if (rank == dono_resultado) {
-        struct Bloco *ultimo = &blocos[(num_blocos_linhas - 1) * num_blocos_colunas(num_blocos_colunas - 1)];
+        struct Bloco *ultimo = &blocos[(num_blocos_linhas - 1) * num_blocos_colunas + (num_blocos_colunas - 1)];
 
         resultado = ultimo->front_baixo[
             ultimo->largura
