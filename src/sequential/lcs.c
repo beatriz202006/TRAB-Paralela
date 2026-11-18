@@ -1,12 +1,17 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 #ifndef max
 #define max( a, b ) ( ((a) > (b)) ? (a) : (b) )
 #endif
 
 typedef unsigned short mtype;
+double tempo_decorrido(struct timespec inicio, struct timespec fim) {
+    return (fim.tv_sec - inicio.tv_sec) +
+           (fim.tv_nsec - inicio.tv_nsec) / 1e9;
+}
 
 /* Read sequence from a file to a char vector.
  Filename is passed as parameter */
@@ -137,6 +142,17 @@ int main(int argc, char ** argv) {
 	// sizes of both sequences
 	int sizeA, sizeB;
 
+	struct timespec inicio_total, fim_total;
+    struct timespec inicio_fase, fim_fase;
+
+    double tempo_preparacao;
+    double tempo_calculo;
+    double tempo_finalizacao;
+    double tempo_total;
+
+	clock_gettime(CLOCK_MONOTONIC, &inicio_total);
+    inicio_fase = inicio_total;
+
 	//read both sequences
 	seqA = read_seq("fileA.in");
 	seqB = read_seq("fileB.in");
@@ -150,21 +166,36 @@ int main(int argc, char ** argv) {
 
 	//initialize LCS score matrix
 	initScoreMatrix(scoreMatrix, sizeA, sizeB);
+	clock_gettime(CLOCK_MONOTONIC, &fim_fase);
+    tempo_preparacao = tempo_decorrido(inicio_fase, fim_fase);
+
+    inicio_fase = fim_fase;
 
 	//fill up the rest of the matrix and return final score (element locate at the last line and collumn)
 	mtype score = LCS(scoreMatrix, sizeA, sizeB, seqA, seqB);
 
-	/* if you wish to see the entire score matrix,
-	 for debug purposes, define DEBUGMATRIX. */
-#ifdef DEBUGMATRIX
-	printMatrix(seqA, seqB, scoreMatrix, sizeA, sizeB);
-#endif
+	clock_gettime(CLOCK_MONOTONIC, &fim_fase);
+    tempo_calculo = tempo_decorrido(inicio_fase, fim_fase);
+
+    inicio_fase = fim_fase;
+
 
 	//print score
 	printf("\nScore: %d\n", score);
 
 	//free score matrix
 	freeScoreMatrix(scoreMatrix, sizeB);
+
+	clock_gettime(CLOCK_MONOTONIC, &fim_fase);
+    tempo_finalizacao = tempo_decorrido(inicio_fase, fim_fase);
+
+    clock_gettime(CLOCK_MONOTONIC, &fim_total);
+    tempo_total = tempo_decorrido(inicio_total, fim_total);
+
+	printf("Tempo de preparação: %.6f s\n", tempo_preparacao);
+    printf("Tempo de cálculo: %.6f s\n", tempo_calculo);
+    printf("Tempo de finalização: %.6f s\n", tempo_finalizacao);
+    printf("Tempo total: %.6f s\n", tempo_total);
 
 	return EXIT_SUCCESS;
 }

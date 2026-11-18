@@ -30,6 +30,13 @@ int lcs_wavefront(
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
     MPI_Comm_size(MPI_COMM_WORLD, &num_processos);
 
+    // Temporizadores das diferentes etapas
+    double tempo_preparacao = 0.0;
+    double tempo_calculo = 0.0;
+    double tempo_comunicacao = 0.0;
+    double inicio_fase = MPI_Wtime();
+    double inicio_total = inicio_fase;
+
 
     int tamA = A->tam;
     int tamB = B->tam;
@@ -132,10 +139,18 @@ int lcs_wavefront(
         }
     }
 
+    // Finaliza a medição da preparação local
+    tempo_preparacao = MPI_Wtime() - inicio_fase;
+
+    // Mede a comunicação da verificação das alocações
+    inicio_fase = MPI_Wtime();
+
     // Verifica se todos os processos conseguiram alocar os buffers
     int erro_buffers_global = 0;
 
     MPI_Allreduce(&erro_buffers, &erro_buffers_global, 1, MPI_INT, MPI_MAX, MPI_COMM_WORLD);
+
+    tempo_comunicacao += MPI_Wtime() - inicio_fase;
 
     if (erro_buffers_global) {
 
@@ -154,13 +169,21 @@ int lcs_wavefront(
         num_blocos_linhas + num_blocos_colunas - 1;
 
     for (int diag = 0; diag < total_diagonais; diag++) {
-        // Calcula os blocos da diagonal utilizando OpenMP
+
+        // Mede o cálculo paralelo da diagonal
+        inicio_fase = MPI_Wtime();
+
         int erro_local = calcular_diagonal(blocos, num_blocos_linhas, num_blocos_colunas, diag, rank, num_processos, A, B, buffers);
+
+        tempo_calculo += MPI_Wtime() - inicio_fase;
 
         // Verifica erros de cálculo entre os processos
         int erro_global = 0;
 
+        // Mede a comunicação da verificação de erros de cálculo
+        inicio_fase = MPI_Wtime();
         MPI_Allreduce(&erro_local, &erro_global, 1, MPI_INT, MPI_MAX, MPI_COMM_WORLD);
+        tempo_comunicacao += MPI_Wtime() - inicio_fase;
 
         if (erro_global) {
             libera_buffers(buffers, num_threads);
@@ -168,11 +191,14 @@ int lcs_wavefront(
             return -1;
         }
 
+        // Mede a sincronização das fronteiras entre processos
+        inicio_fase = MPI_Wtime();
         // Sincroniza as fronteiras entre os processos MPI
         int erro_sync = sincronizar_diagonal(blocos, num_blocos_linhas, num_blocos_colunas, diag, num_processos);
 
         // Verifica erros de sincronização
         MPI_Allreduce(&erro_sync, &erro_global, 1, MPI_INT, MPI_MAX, MPI_COMM_WORLD);
+        tempo_comunicacao += MPI_Wtime() - inicio_fase;
 
         if (erro_global) {
             libera_buffers(buffers, num_threads);
@@ -195,8 +221,41 @@ int lcs_wavefront(
         ];
     }
 
+    // Mede a comunicação do resultado final
+    inicio_fase = MPI_Wtime();
     // Compartilha o resultado final com todos os processos
     MPI_Bcast(&resultado, 1, MPI_UNSIGNED_SHORT, dono_resultado, MPI_COMM_WORLD);
+    tempo_comunicacao += MPI_Wtime() - inicio_fase;
+    double tempo_total = MPI_Wtime() - inicio_total;
+
+    // Tempos locais de cada processo
+    double tempos_locais[4] = {
+        tempo_preparacao,
+        tempo_calculo,
+        tempo_comunicacao,
+        tempo_total
+    };
+
+    // Maiores tempos observados entre os processos
+    double tempos_maximos[4] = {0.0, 0.0, 0.0, 0.0};
+
+    MPI_Reduce(
+        tempos_locais,
+        tempos_maximos,
+        4,
+        MPI_DOUBLE,
+        MPI_MAX,
+        0,
+        MPI_COMM_WORLD
+    );
+
+    // Exibe os tempos apenas no processo raiz
+    if (rank == 0) {
+        printf("Tempo de preparação: %.6f s\n", tempos_maximos[0]);
+        printf("Tempo de cálculo: %.6f s\n", tempos_maximos[1]);
+        printf("Tempo de comunicação: %.6f s\n", tempos_maximos[2]);
+        printf("Tempo total: %.6f s\n", tempos_maximos[3]);
+    }
 
     // Libera a memória utilizada
     libera_buffers(buffers, num_threads);
